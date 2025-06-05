@@ -268,7 +268,7 @@ func (c *ConnectionWrap) Close() {
 
 	// 关闭通道
 	close(c.responseChan) // 触发writeLoop()退出监听
-	close(c.quitChan)     // 触发writeLoop()退出监听
+	close(c.quitChan)     // 触发writeLoop()、quitLoop()退出监听
 
 	// 关闭连接
 	c.connectionManager.remove(c)
@@ -314,24 +314,3 @@ func (c *ConnectionWrap) disconnectCallback() {
 		c.client.handler.Disconnected(c, c.client.urlParameterMap, c.client.headerMap)
 	}
 }
-
-/*
-func (c *ConnectionClient) Reconnect() {
-	c.isCloseLock.Lock()
-	defer c.isCloseLock.Unlock()
-
-	if c.isClose {
-		ticker := time.NewTicker(10 * time.Second)
-		for {
-			select {
-			case <-ticker.C:
-				err := c.client.connect(c.url) // 其实还是共用同一个wsClient,只是里面的conn更改了而已
-				if err == nil {
-					ticker.Stop()
-					return
-				}
-			}
-		}
-	}
-}
-*/

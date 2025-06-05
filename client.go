@@ -4,222 +4,285 @@ import (
 	"context"
 	"fmt"
 	"github.com/gorilla/websocket"
-	"net/http"
-	"net/url"
+	"github.com/zhengweiye/gopool"
 	"sync"
 	"time"
 )
 
-type Client struct {
-	clientIp          string
-	clientType        string // 服务名称
-	connWrap          *ConnectionWrap
-	handler           Handler // 处理器
-	ctx               context.Context
-	globalWaitGroup   *sync.WaitGroup // 全局WaitGroup，确保所有Client执行完成
-	response          http.ResponseWriter
-	request           *http.Request
-	urlParameters     []string
-	urlParameterMap   map[string]string
-	headerNames       []string
-	headerMap         map[string]string
-	responseQueueSize int
-	poolWorkerSize    int
-	poolQueueSize     int
-	heartBeatSeconds  int64
-}
-
-var clientLock sync.Mutex
-
-type Option func(c *Client)
-
 /**
- * 服务队接受（监听）客户端连接
- * （1）客户端连接进来，调用 AcceptClient()函数
- * （2）客户端发送数据进来，不会再调用 AcceptClient()函数
- * @param clientType 客户端类型，不同业务不同的类型
+ * 客户端连接服务端
+ * @param url
  * @param ctx
  * @param wg
- * @param response http响应
- * @param request http请求
- * @param opts 选项配置，自定义选项
+ * @param handler 业务处理
  */
-func AcceptClient(
-	clientType string,
-	ctx context.Context,
-	wg *sync.WaitGroup,
-	response http.ResponseWriter,
-	request *http.Request,
-	opts ...Option,
-) *Client {
-	// 创建client对象
-	client := &Client{
-		clientType:        clientType,
-		ctx:               ctx,
-		globalWaitGroup:   wg,
-		response:          response,
-		request:           request,
-		urlParameterMap:   make(map[string]string),
-		headerMap:         make(map[string]string),
-		responseQueueSize: 50,
-		poolWorkerSize:    5,
-		poolQueueSize:     50,
-		heartBeatSeconds:  0,
-	}
-
-	// 给字段赋值
-	for _, opt := range opts {
-		opt(client)
-	}
-
-	// 监听conn
-	client.listenConn()
-
-	// 定时发送心跳
-	if client.heartBeatSeconds > 0 {
-		newHeartBeat(clientType, client.heartBeatFunc)
-	}
-
-	fmt.Printf("[gows] [%s] [%s] [%s] connect success\n", time.Now().Format("2006-01-02 15:04:05"), client.clientType, client.clientIp)
-	return client
-}
-
-/**
- * url携带参数
- * 如：ws://127.0.0.1:8080/ws/test?apiKey=xxx&userId=xxx
- * paramNames 参数名称（数组）
- */
-func UrlParamOption(paramNames []string) Option {
-	return func(client *Client) {
-		client.urlParameters = paramNames
-	}
-}
-
-/*
- * 请求头参数
- * headerNames 请求头名称（数组）
- */
-func HeaderOption(headerNames []string) Option {
-	return func(client *Client) {
-		client.headerNames = headerNames
-	}
-}
-
-/*
- * 协程池
- * workerSize 协程数量
- * queueSize 每个协程负责监听的工作队列大小
- */
-func PoolOption(workerSize, queueSize int) Option {
-	return func(client *Client) {
-		client.poolWorkerSize = workerSize
-		client.poolQueueSize = queueSize
-	}
-}
-
-/*
- * 响应客户端：服务端个客户端发送数据时，不是实时发送，而是把数据放到队列里面，由独立协程负责读取队列数据并且发送给客户端
- * queueSize 队列长度
- */
-func ResponseOption(queueSize int) Option {
-	return func(client *Client) {
-		client.responseQueueSize = queueSize
-	}
-}
-
-/*
- * 心跳
- * seconds：每隔{seconds}秒往客户端，发送一个心跳包
- */
-func HeartBeatOption(seconds int64) Option {
-	return func(client *Client) {
-		client.heartBeatSeconds = seconds
-	}
-}
-
-/*
- * 回调handler
- */
-func HandlerOption(handler Handler) Option {
-	return func(client *Client) {
-		client.handler = handler
-	}
-}
-
-/**
- * 获取客户端的 “连接”
- */
-func (c *Client) GetConnection() *ConnectionWrap {
-	return c.connWrap
-}
-
-func (c *Client) listenConn() {
-	// 服务升级
-	upgrader := &websocket.Upgrader{
-		//ReadBufferSize:  1024,// 读缓冲区大小
-		//WriteBufferSize: 1024,// 写缓冲区大小
-		CheckOrigin: func(r *http.Request) bool { // 检查请求来源
-			/**
-			if r.Method != "GET" {
-				fmt.Println("method is not GET")
-			    return false
-			}
-			if r.URL.Path != "/ws" {
-			    fmt.Println("path error")
-			    return false
-			}
-			*/
-			return true
-		},
-	}
-	conn, err := upgrader.Upgrade(c.response, c.request, nil)
+func ConnectServer(url string, ctx context.Context, wg *sync.WaitGroup, handler ClientHandler) (err error) {
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
-		panic(err)
+		return
+	}
+	newConnection(url, conn, ctx, wg, handler)
+	return
+}
+
+type ClientConnection struct {
+	url           string
+	heartBeatTime int64
+	pool          *gopool.Pool
+	conn          *websocket.Conn
+	ctx           context.Context
+	wg            *sync.WaitGroup
+	handler       ClientHandler
+	readWg        *sync.WaitGroup
+	writeWg       *sync.WaitGroup
+	disconnectWg  *sync.WaitGroup
+	writeChan     chan Data
+	quitChan      chan int
+	close         bool
+	closeLock     sync.Mutex
+}
+
+func newConnection(url string, conn *websocket.Conn, ctx context.Context, wg *sync.WaitGroup, handler ClientHandler) *ClientConnection {
+	readWg := &sync.WaitGroup{}
+	writeWg := &sync.WaitGroup{}
+	disconnectWg := &sync.WaitGroup{}
+	connWrap := &ClientConnection{
+		heartBeatTime: 15,
+		pool:          newPool("ws_client", ctx, wg, 50, 3),
+		conn:          conn,
+		ctx:           ctx,
+		wg:            wg,
+		handler:       handler,
+		readWg:        readWg,
+		writeWg:       writeWg,
+		disconnectWg:  disconnectWg,
+		writeChan:     make(chan Data, 50),
+		quitChan:      make(chan int),
 	}
 
-	// clientIp
-	c.clientIp = conn.RemoteAddr().String()
+	// 监听
+	connWrap.listen()
 
-	// url参数
-	if len(c.urlParameters) > 0 {
-		url, err2 := url.Parse(c.request.RequestURI)
-		if err2 != nil {
-			m := map[string]any{
-				"isSuccess": false,
-				"msg":       fmt.Sprint(err2),
-			}
-			conn.WriteJSON(m)
-			conn.Close()
+	// 回调触发
+	connWrap.connectedCallback()
+
+	/*
+	 * （1）这里加1
+	 * （2）Close()时Done()
+	 * （3）main()函数的信号量执行wait()
+	 */
+	connWrap.wg.Add(1)
+
+	return connWrap
+}
+
+func (c *ClientConnection) listen() {
+	go c.quitLoop()
+	go c.writeLoop()
+	go c.writeLoop()
+}
+
+func (c *ClientConnection) quitLoop() {
+	defer c.Close()
+	for {
+		select {
+		case <-c.ctx.Done():
+			/*
+			 * 调用cancel()时，触发
+			 */
+			return
+		case <-c.quitChan:
+			/*
+			 * 触发条件
+			 * 	（1）processWrite()报错 c.quitChan<-1
+			 *  （2）Close()立马close(quitChan)
+			 */
 			return
 		}
-		for _, parameterName := range c.urlParameters {
-			c.urlParameterMap[parameterName] = url.Query().Get(parameterName)
-		}
 	}
-
-	// 请求头
-	if len(c.headerNames) > 0 {
-		for _, headerName := range c.headerNames {
-			c.headerMap[headerName] = c.request.Header.Get(headerName)
-		}
-	}
-
-	// 创建conn的包装类
-	c.connWrap = newConnectionWrap(conn, c)
 }
 
-func (c *Client) heartBeatFunc() {
-	go func() {
-		ticker := time.NewTicker(time.Duration(c.heartBeatSeconds) * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-c.ctx.Done():
+func (c *ClientConnection) readLoop() {
+	defer c.conn.Close()
+	for {
+		select {
+		default:
+			/*
+			 * （1）这里一直会堵塞，导致其它分支无法被及时触发
+			 * （2）这里退出监听的唯一条件是 c.conn.Close()-->连接断开
+			 * （3）心跳包数据不会被读取
+			 */
+			messageType, messageData, err := c.conn.ReadMessage()
+			if err != nil {
+				fmt.Printf("[gows client] [%s] read data err, errMsg=%v\n", time.Now().Format("2006-01-02 15:04:05"), err)
 				return
-			case <-ticker.C:
-				c.connWrap.connectionManager.check()
+			}
+
+			// 协程池处理请求
+			c.pool.ExecTask(gopool.Job{
+				JobName: "client_process",
+				JobFunc: c.processRead,
+				JobParam: map[string]any{
+					"messageType": messageType,
+					"messageData": messageData,
+				},
+			})
+		}
+	}
+}
+
+func (c *ClientConnection) writeLoop() {
+	ticker := time.NewTicker(time.Duration(c.heartBeatTime) * time.Second)
+	defer c.Close()
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.quitChan:
+			/*
+			 * 触发条件
+			 * 	（1）processWrite()报错 c.quitChan<-1
+			 *  （2）Close()立马close(quitChan)
+			 */
+			return
+		case <-ticker.C:
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				fmt.Printf("[gows client] write ping message err, errMsg=%v\n", err)
+				return
+			}
+		case data := <-c.writeChan:
+			/*
+			 * 触发条件
+			 * （1）Close()里面执行close(c.writeChan)时，会触发这里
+			 * （2）Send()方法调用
+			 */
+			if data.MessageType > 0 { // 防止close(c.responseChan)时，还往客户端响应数据
+				c.processWrite(data)
 			}
 		}
-	}()
+	}
+}
+
+func (c *ClientConnection) processRead(workerId int, jobName string, param map[string]any) (err error) {
+	c.readWg.Add(1)
+	defer c.readWg.Done()
+
+	messageType := param["messageType"].(int)
+	messageData := param["messageData"].([]byte)
+
+	// 业务函数回调
+	c.doCallback(messageType, messageData)
+	return
+}
+
+func (c *ClientConnection) processWrite(data Data) {
+	defer c.writeWg.Done()
+	err := c.conn.WriteMessage(data.MessageType, data.MessageData)
+
+	// 响应错误时，证明连接断开了，退出监听
+	if err != nil {
+		c.quitChan <- 1
+	}
+	return
+}
+
+/*
+ * 发送数据
+ */
+func (c *ClientConnection) Send(data Data) (err error) {
+	switch data.MessageType {
+	case websocket.TextMessage:
+	case websocket.BinaryMessage:
+	case websocket.CloseMessage:
+	case websocket.PingMessage:
+	case websocket.PongMessage:
+		err = fmt.Errorf("不支持messageType[%d]", data.MessageType)
+		return
+	}
+	c.writeWg.Add(1)
+	c.writeChan <- data
+	return
+}
+
+/*
+ * 关闭连接
+ */
+func (c *ClientConnection) Close() {
+	c.closeLock.Lock()
+	defer c.closeLock.Unlock()
+
+	if c.close {
+		return
+	}
+	c.close = true
+
+	fmt.Printf("[gows client] [%s] stoping\n", time.Now().Format("2006-01-02 15:04:05"))
+
+	// 请求处理堵塞
+	c.readWg.Wait()
+
+	// 回调函数执行
+	c.disconnectCallback()
+
+	// 回调堵塞
+	c.disconnectWg.Wait()
+
+	// 响应堵塞
+	c.writeWg.Wait() // 必须放在最后，因为上面两个Wait()都可能需要往客户端发送数据
+	fmt.Printf("[gows client] [%s] stop finish\n", time.Now().Format("2006-01-02 15:04:05"))
+
+	// 关闭通道
+	close(c.writeChan) // 触发writeLoop()退出监听
+	close(c.quitChan)  // 触发writeLoop()、quitLoop()退出监听
+
+	// 标记完成
+	c.wg.Done()
+}
+
+/*
+ * 重连
+ */
+func (c *ClientConnection) Reconnect() (ok bool, err error) {
+	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
+	if err != nil {
+		return false, err
+	}
+	newConnection(c.url, conn, c.ctx, c.wg, c.handler)
+	return true, nil
+}
+
+func (c *ClientConnection) connectedCallback() {
+	if c.handler != nil {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Printf("[gows client] Connected() function callback error, errMsg=%v\n", err)
+			}
+		}()
+		c.handler.Connected(c)
+	}
+}
+
+func (c *ClientConnection) doCallback(messageType int, messageData []byte) {
+	if c.handler != nil {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Printf("[gows client] [%s] do() function callback err, errMsg=%v \n",
+					time.Now().Format("2006-01-02 15:04:05"),
+					err,
+				)
+			}
+		}()
+		c.handler.Do(c, Data{
+			MessageType: messageType,
+			MessageData: messageData,
+		})
+	}
+}
+
+func (c *ClientConnection) disconnectCallback() {
+	if c.handler != nil {
+		c.disconnectWg.Add(1)
+		defer c.disconnectWg.Done()
+		c.handler.Disconnected(c)
+	}
 }

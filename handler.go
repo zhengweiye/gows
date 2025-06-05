@@ -1,6 +1,6 @@
 package gows
 
-type Handler interface {
+type ServerHandler interface {
 	/**
 	 * 客户端连接成功触发
 	 * 建议场景：（1）做校验，例如token失效，那么主动断开连接；（2）做日志记录
@@ -8,7 +8,6 @@ type Handler interface {
 	 * urlParameterMap：websocket请求地址附带的参数
 	 * headerMap：请求头数据
 	 */
-
 	Connected(conn *ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string)
 
 	/**
@@ -19,7 +18,6 @@ type Handler interface {
 	 * urlParameterMap：websocket请求地址附带的参数
 	 * headerMap：请求头数据
 	 */
-
 	Do(conn *ConnectionWrap, data Data, urlParameterMap map[string]string, headerMap map[string]string)
 
 	/**
@@ -29,8 +27,24 @@ type Handler interface {
 	 * urlParameterMap：websocket请求地址附带的参数
 	 * headerMap：请求头数据
 	 */
-
 	Disconnected(conn *ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string)
+}
+
+type ClientHandler interface {
+	/**
+	 * 连接成功
+	 */
+	Connected(conn *ClientConnection)
+
+	/**
+	 * 处理
+	 */
+	Do(conn *ClientConnection, data Data)
+
+	/**
+	 * 断开连接触发
+	 */
+	Disconnected(conn *ClientConnection)
 }
 
 type Data struct {

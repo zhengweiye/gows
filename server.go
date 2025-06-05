@@ -14,7 +14,7 @@ type Client struct {
 	clientIp          string
 	clientType        string // 服务名称
 	connWrap          *ConnectionWrap
-	handler           Handler // 处理器
+	handler           ServerHandler // 处理器
 	ctx               context.Context
 	globalWaitGroup   *sync.WaitGroup // 全局WaitGroup，确保所有Client执行完成
 	response          http.ResponseWriter
@@ -138,7 +138,7 @@ func HeartBeatOption(seconds int64) Option {
 /*
  * 回调handler
  */
-func HandlerOption(handler Handler) Option {
+func HandlerOption(handler ServerHandler) Option {
 	return func(client *Client) {
 		client.handler = handler
 	}

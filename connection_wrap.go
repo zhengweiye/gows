@@ -284,7 +284,7 @@ func (c *ConnectionWrap) connectedCallback() {
 				fmt.Printf("[gows] [%s] Connected() function callback error, errMsg=%v\n", c.client.clientType, err)
 			}
 		}()
-		c.client.handler.Connected(c.client.clientType, c, c.client.urlParameterMap, c.client.headerMap)
+		c.client.handler.Connected(c, c.client.urlParameterMap, c.client.headerMap)
 	}
 }
 
@@ -300,7 +300,7 @@ func (c *ConnectionWrap) doCallback(messageType int, messageData []byte) {
 				)
 			}
 		}()
-		c.client.handler.Do(c.client.clientType, c, Data{
+		c.client.handler.Do(c, Data{
 			MessageType: messageType,
 			MessageData: messageData,
 		}, c.client.urlParameterMap, c.client.headerMap)
@@ -311,7 +311,7 @@ func (c *ConnectionWrap) disconnectCallback() {
 	if c.client.handler != nil {
 		c.disconnectWg.Add(1)
 		defer c.disconnectWg.Done()
-		c.client.handler.Disconnected(c.client.clientType, c, c.client.urlParameterMap, c.client.headerMap)
+		c.client.handler.Disconnected(c, c.client.urlParameterMap, c.client.headerMap)
 	}
 }
 

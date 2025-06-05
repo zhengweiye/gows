@@ -41,8 +41,8 @@ func NewCustom1Handler() Custom1Handler {
 	return Custom1Handler{}
 }
 
-func (c Custom1Handler) Connected(clientType string, conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
-	fmt.Printf("触发Connected()：clientType=%s, param=%v, header=%v\n", clientType, urlParameterMap, headerMap)
+func (c Custom1Handler) Connected(conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
+	fmt.Printf("触发Connected()：param=%v, header=%v\n", urlParameterMap, headerMap)
 	conn.SetGroupId(urlParameterMap["userId"])
 
 	for key, value := range conn.GetConnectionManager().GetConnections() {
@@ -53,8 +53,8 @@ func (c Custom1Handler) Connected(clientType string, conn *gows.ConnectionWrap, 
 	}
 }
 
-func (c Custom1Handler) Do(clientType string, conn *gows.ConnectionWrap, data gows.Data, urlParameterMap map[string]string, headerMap map[string]string) {
-	fmt.Printf("触发Do()：clientType=%s, param=%v, content=%s\n", clientType, urlParameterMap, string(data.MessageData))
+func (c Custom1Handler) Do(conn *gows.ConnectionWrap, data gows.Data, urlParameterMap map[string]string, headerMap map[string]string) {
+	fmt.Printf("触发Do()：param=%v, content=%s\n", urlParameterMap, string(data.MessageData))
 
 	time.Sleep(10 * time.Second)
 
@@ -64,6 +64,6 @@ func (c Custom1Handler) Do(clientType string, conn *gows.ConnectionWrap, data go
 	})
 }
 
-func (c Custom1Handler) Disconnected(clientType string, conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
-	fmt.Printf("触发Disconnected()：clientType=%s, param=%v\n", clientType, urlParameterMap)
+func (c Custom1Handler) Disconnected(conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
+	fmt.Printf("触发Disconnected() param=%v\n", urlParameterMap)
 }

@@ -39,12 +39,12 @@ func NewCustom2Handler() Custom2Handler {
 	return Custom2Handler{}
 }
 
-func (c Custom2Handler) Connected(clientType string, conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
-	fmt.Printf("触发Connected()：clientType=%s, param=%v\n", clientType, urlParameterMap)
+func (c Custom2Handler) Connected(conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
+	fmt.Printf("触发Connected() param=%v\n", urlParameterMap)
 }
 
-func (c Custom2Handler) Do(clientType string, conn *gows.ConnectionWrap, data gows.Data, urlParameterMap map[string]string, headerMap map[string]string) {
-	fmt.Printf("触发Do()：clientType=%s, param=%v, content=%s\n", clientType, urlParameterMap, string(data.MessageData))
+func (c Custom2Handler) Do(conn *gows.ConnectionWrap, data gows.Data, urlParameterMap map[string]string, headerMap map[string]string) {
+	fmt.Printf("触发Do() param=%v, content=%s\n", urlParameterMap, string(data.MessageData))
 
 	//time.Sleep(15 * time.Second)
 
@@ -54,6 +54,6 @@ func (c Custom2Handler) Do(clientType string, conn *gows.ConnectionWrap, data go
 	})
 }
 
-func (c Custom2Handler) Disconnected(clientType string, conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
-	fmt.Printf("触发Disconnected()：clientType=%s, param=%v\n", clientType, urlParameterMap)
+func (c Custom2Handler) Disconnected(conn *gows.ConnectionWrap, urlParameterMap map[string]string, headerMap map[string]string) {
+	fmt.Printf("触发Disconnected()：param=%v\n", urlParameterMap)
 }

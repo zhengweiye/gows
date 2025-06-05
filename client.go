@@ -34,17 +34,16 @@ var clientLock sync.Mutex
 type Option func(c *Client)
 
 /**
- * 接受（监听）客户端
- * （1）客户端连接进来，调用 AcceptClient()函数 --> 会被拦截器拦截
- * （2）客户端发送数据进来，不会再调用 AcceptClient()函数 --> 不会经过拦截器
- * （3）客户端分类管理
- * 		（1）不同 “业务”，创建不同的 Client，通过name去区分Client
- *  	（2）通过group对Connection进行分组管理，例如：使用userId作为group，一个账号在不同pc建立Connection，通过userId作为group，可以批量给该分组进行推送数据
- * （4）客户端断开
- *		（1）外部的web服务（如：gin、net/http）停止
- *		（2）客户端主动断开
+ * 服务队接受（监听）客户端连接
+ * （1）客户端连接进来，调用 AcceptClient()函数
+ * （2）客户端发送数据进来，不会再调用 AcceptClient()函数
+ * @param clientType 客户端类型，不同业务不同的类型
+ * @param ctx
+ * @param wg
+ * @param response http响应
+ * @param request http请求
+ * @param opts 选项配置，自定义选项
  */
-
 func AcceptClient(
 	clientType string,
 	ctx context.Context,
@@ -53,7 +52,7 @@ func AcceptClient(
 	request *http.Request,
 	opts ...Option,
 ) *Client {
-	// 创建server
+	// 创建client对象
 	client := &Client{
 		clientType:        clientType,
 		ctx:               ctx,

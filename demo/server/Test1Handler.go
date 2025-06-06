@@ -6,7 +6,6 @@ import (
 	"github.com/zhengweiye/gows"
 	"net/http"
 	"sync"
-	"time"
 )
 
 type Test1Handler struct {
@@ -56,7 +55,7 @@ func (c Custom1Handler) Connected(conn *gows.ConnectionWrap, urlParameterMap map
 func (c Custom1Handler) Do(conn *gows.ConnectionWrap, data gows.Data, urlParameterMap map[string]string, headerMap map[string]string) {
 	fmt.Printf("触发Do()：param=%v, content=%s\n", urlParameterMap, string(data.MessageData))
 
-	time.Sleep(10 * time.Second)
+	//time.Sleep(10 * time.Second)
 
 	conn.Send(gows.Data{
 		MessageType: data.MessageType,

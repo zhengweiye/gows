@@ -126,9 +126,6 @@ func (c *ConnectionWrap) Send(data Data) (err error) {
 	switch data.MessageType {
 	case websocket.TextMessage:
 	case websocket.BinaryMessage:
-	case websocket.CloseMessage:
-	case websocket.PingMessage:
-	case websocket.PongMessage:
 		err = fmt.Errorf("不支持messageType[%d]", data.MessageType)
 		return
 	}
@@ -221,7 +218,7 @@ func (c *ConnectionWrap) readLoop() {
 }
 
 func (c *ConnectionWrap) processResponse(responseData Data) (err error) {
-	defer c.writeWg.Done()
+	defer c.writeWg.Done() // Send()里面c.writeWg.Add(1)
 	err = c.conn.WriteMessage(responseData.MessageType, responseData.MessageData)
 	// 响应错误时，证明连接断开了，退出监听
 	if err != nil {
@@ -252,7 +249,7 @@ func (c *ConnectionWrap) Close() {
 	}
 	c.close = true
 
-	fmt.Printf("[gows] [%s] [%s] [%s] stoping\n", time.Now().Format("2006-01-02 15:04:05"), c.client.clientType, c.client.clientIp)
+	fmt.Printf("[gows] [%s] [%s] [%s] closing\n", time.Now().Format("2006-01-02 15:04:05"), c.client.clientType, c.client.clientIp)
 
 	// 请求处理堵塞
 	c.readWg.Wait()
@@ -264,7 +261,7 @@ func (c *ConnectionWrap) Close() {
 
 	// 响应堵塞
 	c.writeWg.Wait() // 必须放在最后，因为上面两个Wait()都可能需要往客户端发送数据
-	fmt.Printf("[gows] [%s] [%s] [%s] stop finish\n", time.Now().Format("2006-01-02 15:04:05"), c.client.clientType, c.client.clientIp)
+	fmt.Printf("[gows] [%s] [%s] [%s] close finish\n", time.Now().Format("2006-01-02 15:04:05"), c.client.clientType, c.client.clientIp)
 
 	// 关闭通道
 	close(c.responseChan) // 触发writeLoop()退出监听

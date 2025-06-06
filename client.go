@@ -47,6 +47,7 @@ func newConnection(url string, conn *websocket.Conn, ctx context.Context, wg *sy
 	writeWg := &sync.WaitGroup{}
 	disconnectWg := &sync.WaitGroup{}
 	connWrap := &ClientConnection{
+		url:           url,
 		heartBeatTime: 15,
 		pool:          newPool("ws_client", ctx, wg, 50, 3),
 		conn:          conn,
@@ -78,7 +79,7 @@ func newConnection(url string, conn *websocket.Conn, ctx context.Context, wg *sy
 
 func (c *ClientConnection) listen() {
 	go c.quitLoop()
-	go c.writeLoop()
+	go c.readLoop()
 	go c.writeLoop()
 }
 
@@ -135,7 +136,6 @@ func (c *ClientConnection) writeLoop() {
 	ticker := time.NewTicker(time.Duration(c.heartBeatTime) * time.Second)
 	defer c.Close()
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-c.quitChan:
@@ -146,7 +146,8 @@ func (c *ClientConnection) writeLoop() {
 			 */
 			return
 		case <-ticker.C:
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			err := c.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			if err != nil {
 				fmt.Printf("[gows client] write ping message err, errMsg=%v\n", err)
 				return
 			}
@@ -178,7 +179,6 @@ func (c *ClientConnection) processRead(workerId int, jobName string, param map[s
 func (c *ClientConnection) processWrite(data Data) {
 	defer c.writeWg.Done()
 	err := c.conn.WriteMessage(data.MessageType, data.MessageData)
-
 	// 响应错误时，证明连接断开了，退出监听
 	if err != nil {
 		c.quitChan <- 1
@@ -193,9 +193,6 @@ func (c *ClientConnection) Send(data Data) (err error) {
 	switch data.MessageType {
 	case websocket.TextMessage:
 	case websocket.BinaryMessage:
-	case websocket.CloseMessage:
-	case websocket.PingMessage:
-	case websocket.PongMessage:
 		err = fmt.Errorf("不支持messageType[%d]", data.MessageType)
 		return
 	}
@@ -216,39 +213,45 @@ func (c *ClientConnection) Close() {
 	}
 	c.close = true
 
-	fmt.Printf("[gows client] [%s] stoping\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("[gows client] [%s] closing\n", time.Now().Format("2006-01-02 15:04:05"))
 
 	// 请求处理堵塞
 	c.readWg.Wait()
 
-	// 回调函数执行
-	c.disconnectCallback()
-
-	// 回调堵塞
-	c.disconnectWg.Wait()
-
 	// 响应堵塞
 	c.writeWg.Wait() // 必须放在最后，因为上面两个Wait()都可能需要往客户端发送数据
-	fmt.Printf("[gows client] [%s] stop finish\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("[gows client] [%s] close finish\n", time.Now().Format("2006-01-02 15:04:05"))
 
 	// 关闭通道
 	close(c.writeChan) // 触发writeLoop()退出监听
 	close(c.quitChan)  // 触发writeLoop()、quitLoop()退出监听
 
+	// 关闭底层conn
+	c.conn.Close()
+
+	// 回调函数执行-->c.conn.Close()之后才能回调-->因为如果conn没有关闭，如何用户重连，那么就出问题
+	c.disconnectCallback()
+
 	// 标记完成
 	c.wg.Done()
+
+	// 回调堵塞
+	c.disconnectWg.Wait()
 }
 
 /*
  * 重连
  */
-func (c *ClientConnection) Reconnect() (ok bool, err error) {
+func (c *ClientConnection) Reconnect() (err error) {
+	if !c.close {
+		return
+	}
 	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	if err != nil {
-		return false, err
+		return
 	}
 	newConnection(c.url, conn, c.ctx, c.wg, c.handler)
-	return true, nil
+	return
 }
 
 func (c *ClientConnection) connectedCallback() {

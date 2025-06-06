@@ -204,7 +204,7 @@ func (c *ConnectionManager) check() {
 			})*/
 
 			// 发送 Ping 帧
-			err := conn.conn.WriteMessage(websocket.PingMessage, nil)
+			err := conn.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
 			if err != nil {
 				conn.Close()
 			} else {

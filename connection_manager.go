@@ -203,8 +203,8 @@ func (c *ConnectionManager) check() {
 				return nil
 			})*/
 
-			// 发送 Ping 帧
-			err := conn.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			// WriteControl只能发送 “控制消息”，ping|pong|close，在 {deadline} 秒之后，自动发送
+			err := conn.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(1*time.Second))
 			if err != nil {
 				conn.Close()
 			} else {

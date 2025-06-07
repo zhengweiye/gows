@@ -146,7 +146,8 @@ func (c *ClientConnection) writeLoop() {
 			 */
 			return
 		case <-ticker.C:
-			err := c.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			// WriteControl只能发送 “控制消息”，ping|pong|close，在 {deadline} 秒之后，自动发送
+			err := c.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(1*time.Second))
 			if err != nil {
 				fmt.Printf("[gows client] write ping message err, errMsg=%v\n", err)
 				return
